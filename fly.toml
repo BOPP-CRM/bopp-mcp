@@ -15,6 +15,7 @@ primary_region = "iad"
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
+  # OAuth store + MCP sessions are per-machine; run exactly 1 machine (fly scale count 1)
   processes = ["app"]
 
 [[vm]]

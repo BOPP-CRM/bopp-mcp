@@ -164,8 +164,22 @@ export class BoppOAuthProvider {
     getCodeData(authorizationCode) {
         return this.codes.get(authorizationCode);
     }
+    getTokenOrLoad(token) {
+        const cached = this.tokens.get(token);
+        if (cached) {
+            return cached;
+        }
+        const snapshot = loadOAuthStore();
+        const stored = snapshot.tokens[token];
+        if (!stored || stored.expiresAt <= Date.now()) {
+            return undefined;
+        }
+        const data = fromStoredToken(stored);
+        this.tokens.set(token, data);
+        return data;
+    }
     getTokenData(token) {
-        return this.tokens.get(token);
+        return this.getTokenOrLoad(token);
     }
     async challengeForAuthorizationCode(_client, authorizationCode) {
         const codeData = this.codes.get(authorizationCode);
@@ -184,7 +198,7 @@ export class BoppOAuthProvider {
         return this.issueTokensFromCode(client, authorizationCode, apiKey, codeVerifier, resource);
     }
     async exchangeRefreshTokenForApiKey(client, refreshToken, apiKey, scopes, resource) {
-        const tokenData = this.tokens.get(refreshToken);
+        const tokenData = this.getTokenOrLoad(refreshToken);
         if (!tokenData || tokenData.type !== "refresh") {
             throw new InvalidGrantError("Invalid refresh token");
         }
@@ -203,14 +217,19 @@ export class BoppOAuthProvider {
         return this.createTokenResponse(tokenData.clientId, apiKey, scopes ?? tokenData.scopes, resource ?? tokenData.resource);
     }
     async verifyAccessToken(token) {
-        const tokenData = this.tokens.get(token);
+        const tokenData = this.getTokenOrLoad(token);
         if (!tokenData || tokenData.type !== "access") {
+            console.warn("[auth] invalid access token");
             throw new InvalidTokenError("Invalid access token");
         }
         if (tokenData.expiresAt < Date.now()) {
             this.tokens.delete(token);
             this.persist();
             throw new InvalidTokenError("Access token has expired");
+        }
+        if (!tokenData.apiKey) {
+            console.warn("[auth] access token missing apiKey — reconnect required");
+            throw new InvalidTokenError("Access token is missing credentials");
         }
         return {
             token,

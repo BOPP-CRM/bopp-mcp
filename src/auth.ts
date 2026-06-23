@@ -243,8 +243,25 @@ export class BoppOAuthProvider implements OAuthServerProvider {
     return this.codes.get(authorizationCode);
   }
 
+  private getTokenOrLoad(token: string): TokenData | undefined {
+    const cached = this.tokens.get(token);
+    if (cached) {
+      return cached;
+    }
+
+    const snapshot = loadOAuthStore();
+    const stored = snapshot.tokens[token];
+    if (!stored || stored.expiresAt <= Date.now()) {
+      return undefined;
+    }
+
+    const data = fromStoredToken(stored);
+    this.tokens.set(token, data);
+    return data;
+  }
+
   getTokenData(token: string): TokenData | undefined {
-    return this.tokens.get(token);
+    return this.getTokenOrLoad(token);
   }
 
   async challengeForAuthorizationCode(
@@ -304,7 +321,7 @@ export class BoppOAuthProvider implements OAuthServerProvider {
     scopes?: string[],
     resource?: URL,
   ): Promise<OAuthTokens> {
-    const tokenData = this.tokens.get(refreshToken);
+    const tokenData = this.getTokenOrLoad(refreshToken);
 
     if (!tokenData || tokenData.type !== "refresh") {
       throw new InvalidGrantError("Invalid refresh token");
@@ -338,9 +355,10 @@ export class BoppOAuthProvider implements OAuthServerProvider {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const tokenData = this.tokens.get(token);
+    const tokenData = this.getTokenOrLoad(token);
 
     if (!tokenData || tokenData.type !== "access") {
+      console.warn("[auth] invalid access token");
       throw new InvalidTokenError("Invalid access token");
     }
 
@@ -348,6 +366,11 @@ export class BoppOAuthProvider implements OAuthServerProvider {
       this.tokens.delete(token);
       this.persist();
       throw new InvalidTokenError("Access token has expired");
+    }
+
+    if (!tokenData.apiKey) {
+      console.warn("[auth] access token missing apiKey — reconnect required");
+      throw new InvalidTokenError("Access token is missing credentials");
     }
 
     return {

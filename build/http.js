@@ -44,6 +44,7 @@ function getApiKeyFromAuth(req) {
 async function handleMcpRequest(req, res, handler) {
     const apiKey = getApiKeyFromAuth(req);
     if (!apiKey) {
+        console.warn("[mcp] 401 missing apiKey clientId=%s", req.auth?.clientId ?? "unknown");
         res.status(401).json({
             jsonrpc: "2.0",
             error: { code: -32001, message: "Unauthorized" },
