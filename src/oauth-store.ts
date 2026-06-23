@@ -23,10 +23,16 @@ export type StoredCodeData = {
   apiKey?: string;
 };
 
+export type StoredClientApiKey = {
+  apiKey: string;
+  expiresAt: number;
+};
+
 export type OAuthStoreSnapshot = {
   tokens: Record<string, StoredTokenData>;
   codes: Record<string, StoredCodeData>;
   clients: Record<string, OAuthClientInformationFull>;
+  clientApiKeys?: Record<string, StoredClientApiKey>;
 };
 
 const storePath =
@@ -41,9 +47,10 @@ export function loadOAuthStore(): OAuthStoreSnapshot {
       tokens: data.tokens ?? {},
       codes: data.codes ?? {},
       clients: data.clients ?? {},
+      clientApiKeys: data.clientApiKeys ?? {},
     };
   } catch {
-    return { tokens: {}, codes: {}, clients: {} };
+    return { tokens: {}, codes: {}, clients: {}, clientApiKeys: {} };
   }
 }
 
@@ -61,10 +68,21 @@ export function saveOAuthStore(snapshot: OAuthStoreSnapshot): void {
     codes[key] = value;
   }
 
+  const clientApiKeys: Record<string, StoredClientApiKey> = {};
+  for (const [key, value] of Object.entries(snapshot.clientApiKeys ?? {})) {
+    if (value.expiresAt > now) {
+      clientApiKeys[key] = value;
+    }
+  }
+
   mkdirSync(dirname(storePath), { recursive: true });
   writeFileSync(
     storePath,
-    JSON.stringify({ tokens, codes, clients: snapshot.clients }, null, 2),
+    JSON.stringify(
+      { tokens, codes, clients: snapshot.clients, clientApiKeys },
+      null,
+      2,
+    ),
     "utf8",
   );
 }

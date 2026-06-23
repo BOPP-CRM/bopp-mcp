@@ -42,6 +42,15 @@ export const CLAUDE_REDIRECT_URIS = [
   "https://claude.com/api/mcp/auth_callback",
 ] as const;
 
+export const CHATGPT_REDIRECT_URIS = [
+  "https://chatgpt.com/connector_platform_oauth_redirect",
+] as const;
+
+const KNOWN_REDIRECT_URIS = [
+  ...CLAUDE_REDIRECT_URIS,
+  ...CHATGPT_REDIRECT_URIS,
+] as const;
+
 const rateLimitOptions = {
   windowMs: 15 * 60 * 1000,
   max: 50,
@@ -50,8 +59,12 @@ const rateLimitOptions = {
   validate: { xForwardedForHeader: false },
 };
 
-const ACCESS_TOKEN_TTL_SEC = 3600;
-const REFRESH_TOKEN_TTL_SEC = 30 * 24 * 3600;
+const ACCESS_TOKEN_TTL_SEC = Number(
+  process.env.MCP_ACCESS_TOKEN_TTL_SEC ?? String(24 * 3600),
+);
+const REFRESH_TOKEN_TTL_SEC = Number(
+  process.env.MCP_REFRESH_TOKEN_TTL_SEC ?? String(365 * 24 * 3600),
+);
 
 type CodeData = {
   client: OAuthClientInformationFull;
@@ -92,7 +105,7 @@ class BoppClientsStore implements OAuthRegisteredClientsStore {
     if (clientId === DEFAULT_CLIENT_ID) {
       return {
         client_id: DEFAULT_CLIENT_ID,
-        redirect_uris: [...CLAUDE_REDIRECT_URIS],
+        redirect_uris: [...KNOWN_REDIRECT_URIS],
       };
     }
 
@@ -105,7 +118,7 @@ class BoppClientsStore implements OAuthRegisteredClientsStore {
     // Accept any client_id and allow Claude's redirect URIs.
     return {
       client_id: clientId,
-      redirect_uris: [...CLAUDE_REDIRECT_URIS],
+      redirect_uris: [...KNOWN_REDIRECT_URIS],
     };
   }
 
@@ -115,7 +128,7 @@ class BoppClientsStore implements OAuthRegisteredClientsStore {
     const redirect_uris = [
       ...new Set([
         ...client.redirect_uris,
-        ...CLAUDE_REDIRECT_URIS,
+        ...KNOWN_REDIRECT_URIS,
       ]),
     ];
     const registered: OAuthClientInformationFull = {
@@ -191,6 +204,7 @@ export class BoppOAuthProvider implements OAuthServerProvider {
 
   private readonly codes = new Map<string, CodeData>();
   private readonly tokens = new Map<string, TokenData>();
+  private readonly clientApiKeys = new Map<string, { apiKey: string; expiresAt: number }>();
 
   constructor() {
     const snapshot = loadOAuthStore();
@@ -206,6 +220,12 @@ export class BoppOAuthProvider implements OAuthServerProvider {
     for (const [code, data] of Object.entries(snapshot.codes)) {
       this.codes.set(code, fromStoredCode(data));
     }
+
+    for (const [clientId, data] of Object.entries(snapshot.clientApiKeys ?? {})) {
+      if (data.expiresAt > Date.now()) {
+        this.clientApiKeys.set(clientId, data);
+      }
+    }
   }
 
   private persist(): void {
@@ -217,7 +237,32 @@ export class BoppOAuthProvider implements OAuthServerProvider {
         [...this.codes.entries()].map(([code, data]) => toStoredCode(code, data)),
       ),
       clients: this.clientsStore.snapshot(),
+      clientApiKeys: Object.fromEntries(this.clientApiKeys),
     });
+  }
+
+  rememberClientApiKey(clientId: string, apiKey: string): void {
+    this.clientApiKeys.set(clientId, {
+      apiKey,
+      expiresAt: Date.now() + REFRESH_TOKEN_TTL_SEC * 1000,
+    });
+    this.persist();
+  }
+
+  getClientApiKey(clientId: string): string | undefined {
+    const cached = this.clientApiKeys.get(clientId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.apiKey;
+    }
+
+    const snapshot = loadOAuthStore();
+    const stored = snapshot.clientApiKeys?.[clientId];
+    if (!stored || stored.expiresAt <= Date.now()) {
+      return undefined;
+    }
+
+    this.clientApiKeys.set(clientId, stored);
+    return stored.apiKey;
   }
 
   async authorize(
@@ -228,6 +273,9 @@ export class BoppOAuthProvider implements OAuthServerProvider {
   ): Promise<void> {
     const code = randomUUID();
     this.codes.set(code, { client, params, apiKey });
+    if (apiKey) {
+      this.rememberClientApiKey(client.client_id, apiKey);
+    }
     this.persist();
 
     const targetUrl = new URL(params.redirectUri);
@@ -240,7 +288,24 @@ export class BoppOAuthProvider implements OAuthServerProvider {
   }
 
   getCodeData(authorizationCode: string): CodeData | undefined {
-    return this.codes.get(authorizationCode);
+    return this.getCodeOrLoad(authorizationCode);
+  }
+
+  private getCodeOrLoad(code: string): CodeData | undefined {
+    const cached = this.codes.get(code);
+    if (cached) {
+      return cached;
+    }
+
+    const snapshot = loadOAuthStore();
+    const stored = snapshot.codes[code];
+    if (!stored) {
+      return undefined;
+    }
+
+    const data = fromStoredCode(stored);
+    this.codes.set(code, data);
+    return data;
   }
 
   private getTokenOrLoad(token: string): TokenData | undefined {
@@ -268,7 +333,7 @@ export class BoppOAuthProvider implements OAuthServerProvider {
     _client: OAuthClientInformationFull,
     authorizationCode: string,
   ): Promise<string> {
-    const codeData = this.codes.get(authorizationCode);
+    const codeData = this.getCodeOrLoad(authorizationCode);
     if (!codeData) {
       throw new InvalidGrantError("Invalid authorization code");
     }
@@ -345,10 +410,9 @@ export class BoppOAuthProvider implements OAuthServerProvider {
       throw new InvalidClientError("Invalid client_secret");
     }
 
-    this.tokens.delete(refreshToken);
-    return this.createTokenResponse(
-      tokenData.clientId,
-      apiKey,
+    return this.renewAccessToken(
+      refreshToken,
+      tokenData,
       scopes ?? tokenData.scopes,
       resource ?? tokenData.resource,
     );
@@ -390,7 +454,7 @@ export class BoppOAuthProvider implements OAuthServerProvider {
     codeVerifier?: string,
     resource?: URL,
   ): Promise<OAuthTokens> {
-    const codeData = this.codes.get(authorizationCode);
+    const codeData = this.getCodeOrLoad(authorizationCode);
     if (!codeData) {
       throw new InvalidGrantError("Invalid authorization code");
     }
@@ -469,6 +533,50 @@ export class BoppOAuthProvider implements OAuthServerProvider {
     }
     return response;
   }
+
+  /** Refresh: issue a new access token but keep the same refresh token (rolling expiry). */
+  private renewAccessToken(
+    refreshToken: string,
+    refreshData: TokenData,
+    scopes: string[],
+    resource?: URL,
+  ): OAuthTokens {
+    const accessToken = randomUUID();
+    const now = Date.now();
+
+    this.tokens.set(accessToken, {
+      apiKey: refreshData.apiKey,
+      clientId: refreshData.clientId,
+      scopes,
+      expiresAt: now + ACCESS_TOKEN_TTL_SEC * 1000,
+      resource,
+      type: "access",
+    });
+
+    // Rolling refresh: extend session on each refresh instead of rotating the token
+    this.tokens.set(refreshToken, {
+      apiKey: refreshData.apiKey,
+      clientId: refreshData.clientId,
+      scopes,
+      expiresAt: now + REFRESH_TOKEN_TTL_SEC * 1000,
+      resource,
+      type: "refresh",
+    });
+
+    this.persist();
+
+    const response: OAuthTokens & { resource?: string } = {
+      access_token: accessToken,
+      token_type: "bearer",
+      expires_in: ACCESS_TOKEN_TTL_SEC,
+      refresh_token: refreshToken,
+      scope: scopes.join(" "),
+    };
+    if (resource) {
+      response.resource = resource.href;
+    }
+    return response;
+  }
 }
 
 async function resolveClient(
@@ -507,12 +615,14 @@ async function resolveApiKey(
   provider: BoppOAuthProvider,
   options: {
     grantType: string;
+    clientId?: string;
     clientSecret?: string;
     authorizationCode?: string;
     refreshToken?: string;
   },
 ): Promise<string> {
-  const { grantType, clientSecret, authorizationCode, refreshToken } = options;
+  const { grantType, clientId, clientSecret, authorizationCode, refreshToken } =
+    options;
 
   // Refresh: use API key stored with the refresh token (Claude may send a wrong client_secret)
   if (grantType === "refresh_token") {
@@ -540,6 +650,13 @@ async function resolveApiKey(
     }
   }
 
+  if (grantType === "authorization_code" && clientId) {
+    const remembered = provider.getClientApiKey(clientId);
+    if (remembered) {
+      return remembered;
+    }
+  }
+
   if (clientSecret) {
     const valid = await validateApiKey(clientSecret);
     if (!valid) {
@@ -551,6 +668,26 @@ async function resolveApiKey(
   throw new InvalidClientError(
     "Enter your BOPP API key on the authorization page, or set it in connector Advanced settings → OAuth Client Secret",
   );
+}
+
+function isAllowedRedirectUri(requested: string, registered: string): boolean {
+  if (redirectUriMatches(requested, registered)) {
+    return true;
+  }
+
+  try {
+    const url = new URL(requested);
+    if (
+      url.origin === "https://chatgpt.com" &&
+      url.pathname.startsWith("/connector/oauth/")
+    ) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 async function completeAuthorize(
@@ -571,7 +708,7 @@ async function completeAuthorize(
   if (redirectUri !== undefined) {
     if (
       !client.redirect_uris.some((registered) =>
-        redirectUriMatches(String(redirectUri), registered),
+        isAllowedRedirectUri(String(redirectUri), registered),
       )
     ) {
       throw new InvalidRequestError("Unregistered redirect_uri");
@@ -620,6 +757,16 @@ export function boppAuthorizeHandler(provider: BoppOAuthProvider) {
 
   router.get("/", async (req, res) => {
     try {
+      const clientId = req.query.client_id;
+      if (typeof clientId === "string") {
+        const remembered = provider.getClientApiKey(clientId);
+        if (remembered) {
+          console.log("[authorize] auto client_id=%s", clientId);
+          await completeAuthorize(provider, req, res, remembered);
+          return;
+        }
+      }
+
       const params: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.query)) {
         if (typeof value === "string") {
@@ -705,6 +852,7 @@ export function boppTokenHandler(provider: BoppOAuthProvider) {
 
           const apiKey = await resolveApiKey(provider, {
             grantType,
+            clientId,
             clientSecret,
             authorizationCode: code,
           });
