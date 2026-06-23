@@ -25,37 +25,7 @@ export async function validateApiKey(apiKey: string): Promise<boolean> {
 
 type QueryParams = Record<string, string | number | undefined>;
 
-export async function apiGet(
-  path: string,
-  query?: QueryParams,
-  apiKey?: string,
-) {
-  const key = apiKey ?? getRequestApiKey();
-
-  const url = new URL(`${API_BASE}${path}`);
-  if (query) {
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined) {
-        url.searchParams.set(key, String(value));
-      }
-    }
-  }
-
-  const response = await fetch(url, {
-    headers: {
-      "X-api-key": key,
-      "content-type": "application/json",
-    },
-  });
-
-  const text = await response.text();
-  let data: unknown = text;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    // keep raw text for non-JSON responses (e.g. export)
-  }
-
+function formatApiResponse(response: Response, data: unknown) {
   if (!response.ok) {
     return {
       content: [
@@ -77,4 +47,69 @@ export async function apiGet(
       },
     ],
   };
+}
+
+async function parseResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+async function apiRequest(
+  method: string,
+  path: string,
+  options?: { query?: QueryParams; body?: unknown; apiKey?: string },
+) {
+  const key = options?.apiKey ?? getRequestApiKey();
+
+  const url = new URL(`${API_BASE}${path}`);
+  if (options?.query) {
+    for (const [param, value] of Object.entries(options.query)) {
+      if (value !== undefined) {
+        url.searchParams.set(param, String(value));
+      }
+    }
+  }
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "X-api-key": key,
+      "content-type": "application/json",
+    },
+    ...(options?.body !== undefined
+      ? { body: JSON.stringify(options.body) }
+      : {}),
+  });
+
+  const data = await parseResponseBody(response);
+  return formatApiResponse(response, data);
+}
+
+export async function apiGet(
+  path: string,
+  query?: QueryParams,
+  apiKey?: string,
+) {
+  return apiRequest("GET", path, { query, apiKey });
+}
+
+export async function apiPost(
+  path: string,
+  body: unknown,
+  apiKey?: string,
+) {
+  return apiRequest("POST", path, { body, apiKey });
+}
+
+export async function apiPut(
+  path: string,
+  body: unknown,
+  apiKey?: string,
+) {
+  return apiRequest("PUT", path, { body, apiKey });
 }

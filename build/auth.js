@@ -408,7 +408,7 @@ export function boppAuthorizeHandler(provider) {
                 }
                 res.status(400);
                 res.setHeader("Content-Type", "text/html; charset=utf-8");
-                res.send(renderAuthorizeForm(params, "Invalid BOPP API key"));
+                res.send(renderAuthorizeForm(params, "API key ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่"));
                 return;
             }
             await completeAuthorize(provider, req, res, apiKey);

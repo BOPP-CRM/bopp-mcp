@@ -1,11 +1,71 @@
 import { z } from "zod";
-import { apiGet } from "./api.js";
+import { apiGet, apiPost, apiPut } from "./api.js";
 const paginationSchema = {
     limit: z.number().int().positive().optional().describe("Page size (default: 20)"),
     offset: z.number().int().min(0).optional().describe("Page offset (default: 0)"),
 };
+const couponIdSchema = {
+    id: z.union([z.string(), z.number()]).describe("Coupon ID"),
+};
+const couponBodySchema = {
+    name: z.string().describe("Coupon name"),
+    currency_id: z.number().int().describe("Currency ID"),
+    value: z.number().describe("Coupon value/points"),
+    code_source: z
+        .enum(["generate", "import"])
+        .optional()
+        .describe("How coupon codes are created (create only)"),
+    code_quantity: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Number of codes to generate"),
+    random_range: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Random part length for generated codes"),
+    prefix_code: z.string().optional().describe("Generated code prefix"),
+    suffix_code: z.string().optional().describe("Generated code suffix"),
+    start_time: z
+        .string()
+        .optional()
+        .describe("Start datetime (YYYY-MM-DD HH:MM:SS)"),
+    end_time: z
+        .string()
+        .optional()
+        .describe("End datetime (YYYY-MM-DD HH:MM:SS)"),
+    code_expiry_interval: z
+        .number()
+        .int()
+        .optional()
+        .describe("Code expiry interval in days"),
+    term_and_condition: z.string().optional().describe("Terms and conditions"),
+    is_show_in_ui: z.boolean().optional().describe("Show coupon in UI"),
+    max_redeem_per_user: z
+        .number()
+        .int()
+        .optional()
+        .describe("Max redemptions per user"),
+    image_base64: z.string().optional().describe("Coupon image as base64"),
+    import_file: z
+        .string()
+        .optional()
+        .describe("Base64-encoded CSV import file (when code_source is import)"),
+    import_filename: z
+        .string()
+        .optional()
+        .describe("Import filename (when code_source is import)"),
+};
+function pickDefined(obj) {
+    return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined));
+}
 export function registerTools(server, apiKey) {
     const get = (path, query) => apiGet(path, query, apiKey);
+    const post = (path, body) => apiPost(path, body, apiKey);
+    const put = (path, body) => apiPut(path, body, apiKey);
     server.registerTool("portal_me", { description: "Get current portal user info" }, async () => get("/portal/me"));
     server.registerTool("list_teams", {
         description: "List portal teams",
@@ -47,22 +107,68 @@ export function registerTools(server, apiKey) {
     server.registerTool("list_coupons", { description: "List all coupons" }, async () => get("/portal/coupons"));
     server.registerTool("get_coupon_by_id", {
         description: "Get a coupon by ID",
-        inputSchema: {
-            id: z.union([z.string(), z.number()]).describe("Coupon ID"),
-        },
+        inputSchema: couponIdSchema,
     }, async ({ id }) => get(`/portal/coupons/${id}`));
+    server.registerTool("create_coupon", {
+        description: "Create a new coupon",
+        inputSchema: couponBodySchema,
+    }, async (input) => post("/portal/coupons", pickDefined(input)));
+    server.registerTool("update_coupon", {
+        description: "Update an existing coupon by ID",
+        inputSchema: {
+            ...couponIdSchema,
+            ...couponBodySchema,
+        },
+    }, async ({ id, ...input }) => put(`/portal/coupons/${id}`, pickDefined(input)));
     server.registerTool("list_coupon_redemptions", {
         description: "List redemptions for a coupon",
         inputSchema: {
-            id: z.union([z.string(), z.number()]).describe("Coupon ID"),
+            ...couponIdSchema,
             ...paginationSchema,
         },
     }, async ({ id, limit, offset }) => get(`/portal/coupons/${id}/redemptions`, { limit, offset }));
+    server.registerTool("add_coupon_codes_generate", {
+        description: "Add auto-generated codes to an existing coupon",
+        inputSchema: {
+            ...couponIdSchema,
+            code_quantity: z
+                .number()
+                .int()
+                .positive()
+                .describe("Number of codes to generate"),
+            random_range: z
+                .number()
+                .int()
+                .positive()
+                .describe("Random part length for generated codes"),
+            prefix_code: z.string().optional().describe("Generated code prefix"),
+            suffix_code: z.string().optional().describe("Generated code suffix"),
+        },
+    }, async ({ id, code_quantity, random_range, prefix_code, suffix_code }) => post(`/portal/coupons/${id}/codes`, {
+        add_source: "generate",
+        code_quantity,
+        random_range,
+        ...pickDefined({ prefix_code, suffix_code }),
+    }));
+    server.registerTool("add_coupon_codes_import", {
+        description: "Import coupon codes from a base64-encoded CSV file",
+        inputSchema: {
+            ...couponIdSchema,
+            import_file: z
+                .string()
+                .describe("Base64-encoded CSV file contents"),
+            import_filename: z
+                .string()
+                .describe("Import filename (e.g. coupon_code_import_template.csv)"),
+        },
+    }, async ({ id, import_file, import_filename }) => post(`/portal/coupons/${id}/codes`, {
+        add_source: "import",
+        import_file,
+        import_filename,
+    }));
     server.registerTool("export_coupon_codes", {
         description: "Export coupon codes for a coupon",
-        inputSchema: {
-            id: z.union([z.string(), z.number()]).describe("Coupon ID"),
-        },
+        inputSchema: couponIdSchema,
     }, async ({ id }) => get(`/portal/coupons/${id}/codes/export`));
     server.registerTool("list_currencies", { description: "List currencies" }, async () => get("/portal/currencies"));
     server.registerTool("list_tiers", { description: "List loyalty tiers" }, async () => get("/portal/tiers"));
