@@ -1,6 +1,5 @@
-# เปลี่ยนชื่อ app ได้ตอน fly launch ถ้าชื่อนี้ถูกใช้แล้ว
-app = "bopp-crm-mcp"
-primary_region = "sin"
+app = "bopp-mcp"
+primary_region = "iad"
 
 [build]
 
