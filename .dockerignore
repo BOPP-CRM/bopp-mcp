@@ -1,0 +1,8 @@
+node_modules
+build
+.env
+.env.*
+.mcp-oauth-store.json
+.git
+.gitignore
+.cursor

@@ -1,0 +1,29 @@
+# เปลี่ยนชื่อ app ได้ตอน fly launch ถ้าชื่อนี้ถูกใช้แล้ว
+app = "bopp-crm-mcp"
+primary_region = "sin"
+
+[build]
+
+[env]
+  MCP_PORT = "3000"
+  MCP_HOST = "0.0.0.0"
+  MCP_TRUST_PROXY = "1"
+  MCP_OAUTH_STORE = "/data/.mcp-oauth-store.json"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# OAuth tokens persist across deploys/restarts
+[mounts]
+  source = "oauth_data"
+  destination = "/data"
