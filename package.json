@@ -1,0 +1,35 @@
+{
+  "name": "crm-mcp",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "BOPP CRM MCP server",
+  "main": "index.js",
+  "bin": {
+    "bopp": "./build/index.js",
+    "bopp-http": "./build/http.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod 755 build/index.js build/http.js",
+    "start": "node build/http.js",
+    "start:stdio": "node build/index.js"
+  },
+  "files": ["build"],
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "pkce-challenge": "^5.0.0",
+    "dotenv": "^17.2.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^26.0.0",
+    "typescript": "^6.0.3"
+  }
+}
