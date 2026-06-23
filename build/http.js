@@ -1,5 +1,8 @@
 import "dotenv/config";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import express from "express";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getOAuthProtectedResourceMetadataUrl, } from "@modelcontextprotocol/sdk/server/auth/router.js";
@@ -18,6 +21,8 @@ const app = createMcpExpressApp({
     host: process.env.MCP_HOST ?? "0.0.0.0",
     ...(allowedHosts?.length ? { allowedHosts } : {}),
 });
+const assetDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "asset");
+app.use("/asset", express.static(assetDir));
 // Behind reverse proxy (nginx, Cloudflare, etc.) — required for rate-limit + correct client IP
 const trustProxy = process.env.MCP_TRUST_PROXY ??
     (serverPublicUrl.protocol === "https:" ? "1" : "false");

@@ -28,6 +28,7 @@ import {
   UnsupportedGrantTypeError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { validateApiKey } from "./api.js";
+import { renderAuthorizeForm } from "./authorize-page.js";
 import {
   loadOAuthStore,
   saveOAuthStore,
@@ -529,14 +530,6 @@ async function resolveApiKey(
   );
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
 async function completeAuthorize(
   provider: BoppOAuthProvider,
   req: express.Request,
@@ -597,46 +590,6 @@ async function completeAuthorize(
   );
 }
 
-function renderAuthorizeForm(
-  params: Record<string, string>,
-  error?: string,
-): string {
-  const hiddenFields = Object.entries(params)
-    .map(
-      ([key, value]) =>
-        `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}" />`,
-    )
-    .join("\n    ");
-
-  return `<!DOCTYPE html>
-<html lang="th">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Connect BOPP CRM</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 80px auto; padding: 0 24px; color: #111; }
-    label { display: block; margin-bottom: 8px; font-weight: 600; }
-    input[type=password] { width: 100%; padding: 10px; font-size: 16px; box-sizing: border-box; }
-    button { margin-top: 16px; padding: 10px 20px; font-size: 16px; cursor: pointer; width: 100%; }
-    p { color: #555; line-height: 1.5; }
-    .error { color: #b00020; margin-bottom: 12px; }
-  </style>
-</head>
-<body>
-  <h1>Connect BOPP CRM</h1>
-  <p>ใส่ BOPP API key เพื่อให้ Claude เข้าถึง CRM ของคุณ</p>
-  ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
-  <form method="POST" action="/authorize">
-    ${hiddenFields}
-    <label for="api_key">BOPP API Key</label>
-    <input id="api_key" name="api_key" type="password" required autocomplete="off" />
-    <button type="submit">Connect</button>
-  </form>
-</body>
-</html>`;
-}
-
 export function boppAuthorizeHandler(provider: BoppOAuthProvider) {
   const router = express.Router();
   router.use(express.urlencoded({ extended: false }));
@@ -678,7 +631,7 @@ export function boppAuthorizeHandler(provider: BoppOAuthProvider) {
         }
         res.status(400);
         res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.send(renderAuthorizeForm(params, "Invalid BOPP API key"));
+        res.send(renderAuthorizeForm(params, "API key ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองใหม่"));
         return;
       }
 

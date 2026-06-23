@@ -8,6 +8,7 @@ import { clientRegistrationHandler } from "@modelcontextprotocol/sdk/server/auth
 import { createOAuthMetadata, mcpAuthMetadataRouter, } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { InvalidClientError, InvalidGrantError, InvalidRequestError, InvalidTokenError, OAuthError, ServerError, UnsupportedGrantTypeError, } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { validateApiKey } from "./api.js";
+import { renderAuthorizeForm } from "./authorize-page.js";
 import { loadOAuthStore, saveOAuthStore, } from "./oauth-store.js";
 export const DEFAULT_CLIENT_ID = "bopp";
 export const CLAUDE_REDIRECT_URIS = [
@@ -330,13 +331,6 @@ async function resolveApiKey(provider, options) {
     }
     throw new InvalidClientError("Enter your BOPP API key on the authorization page, or set it in connector Advanced settings → OAuth Client Secret");
 }
-function escapeHtml(value) {
-    return value
-        .replace(/&/g, "&amp;")
-        .replace(/"/g, "&quot;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-}
 async function completeAuthorize(provider, req, res, apiKey) {
     const input = req.method === "POST" ? req.body : req.query;
     const clientId = input.client_id;
@@ -376,38 +370,6 @@ async function completeAuthorize(provider, req, res, apiKey) {
         codeChallenge: String(codeChallenge),
         resource: resource ? new URL(String(resource)) : undefined,
     }, res, apiKey);
-}
-function renderAuthorizeForm(params, error) {
-    const hiddenFields = Object.entries(params)
-        .map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}" />`)
-        .join("\n    ");
-    return `<!DOCTYPE html>
-<html lang="th">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Connect BOPP CRM</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 80px auto; padding: 0 24px; color: #111; }
-    label { display: block; margin-bottom: 8px; font-weight: 600; }
-    input[type=password] { width: 100%; padding: 10px; font-size: 16px; box-sizing: border-box; }
-    button { margin-top: 16px; padding: 10px 20px; font-size: 16px; cursor: pointer; width: 100%; }
-    p { color: #555; line-height: 1.5; }
-    .error { color: #b00020; margin-bottom: 12px; }
-  </style>
-</head>
-<body>
-  <h1>Connect BOPP CRM</h1>
-  <p>ใส่ BOPP API key เพื่อให้ Claude เข้าถึง CRM ของคุณ</p>
-  ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
-  <form method="POST" action="/authorize">
-    ${hiddenFields}
-    <label for="api_key">BOPP API Key</label>
-    <input id="api_key" name="api_key" type="password" required autocomplete="off" />
-    <button type="submit">Connect</button>
-  </form>
-</body>
-</html>`;
 }
 export function boppAuthorizeHandler(provider) {
     const router = express.Router();
